@@ -1,12 +1,9 @@
-require 'omniauth/strategies/oauth2'
-
 module OmniAuth
   module Strategies
-
-    # Authenticate to Mail.ru utilizing OAuth 2.0
     #   http://api.mail.ru/docs/guides/oauth/sites/
+    class Mailru < OAuth2
+      DEFAULT_SCOPE = ''
 
-    class Mailru < OmniAuth::Strategies::OAuth2
       option :name, "mailru"
 
       option :client_options, {
@@ -29,7 +26,10 @@ module OmniAuth
           :first_name => raw_info['first_name'],
           :last_name => raw_info['last_name'],
           :image => (raw_info['has_pic'].to_s != "0") && raw_info['pic_big'] || nil,
-          :location => (raw_info['location'] || {})['name'],
+          :location => ((raw_info['location'] || {})['city'] || {})['name'],
+          # gender is binary :)
+          :gender => raw_info['sex'] == 0 ? 'male' : 'female',
+          :birthday => raw_info['birthday'],
           :urls => {
             'Mailru' => raw_info['link']
           }
@@ -41,7 +41,28 @@ module OmniAuth
       end
 
       def callback_url
-        options.callback_url || super
+        full_host + script_name + callback_path
+      end
+
+      # You can pass +display+ or +scope+ params to the auth request, if
+      # you need to set them dynamically.
+      #
+      # http://vk.com/dev/oauth_dialog
+      #
+      def authorize_params
+        super.tap do |params|
+          # just a copypaste from ominauth-facebook
+          %w[code state].each do |v|
+            if request.params[v]
+              params[v.to_sym] = request.params[v]
+
+              # to support omniauth-oauth2's auto csrf protection
+              session['omniauth.state'] = params[:state] if v == 'state'
+            end
+          end
+
+          params[:scope] ||= DEFAULT_SCOPE
+        end
       end
 
       private
@@ -52,10 +73,10 @@ module OmniAuth
             :method => 'users.getInfo',
             :app_id => options.client_id,
             :session_id => access_token.token,
-            :format => "json"
+            :format => 'json'
           }
           params[:sig] = calc_signature(params)
-          result = access_token.get('http://appsmail.ru/platform/api', :params => params).parsed.first
+          result = access_token.get('https://appsmail.ru/platform/api', :params => params).parsed.first
           result
         end
       end
